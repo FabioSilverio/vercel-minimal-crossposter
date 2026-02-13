@@ -16,6 +16,16 @@ type PostResponse = {
   error?: string;
 };
 
+type ThreadsConnectResponse = {
+  ok: boolean;
+  message?: string;
+  error?: string;
+  user?: {
+    id: string;
+    username: string;
+  };
+};
+
 type ChannelsState = Record<Channel, boolean>;
 
 const initialChannels: ChannelsState = {
@@ -40,6 +50,14 @@ export default function Home() {
   const [rememberCredentials, setRememberCredentials] = useState(true);
   const [storageReady, setStorageReady] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [connectingThreads, setConnectingThreads] = useState(false);
+  const [threadsConnection, setThreadsConnection] = useState<{
+    kind: "idle" | "ok" | "error";
+    message: string;
+  }>({
+    kind: "idle",
+    message: "",
+  });
   const [result, setResult] = useState<PostResponse | null>(null);
 
   const selectedChannels = useMemo(
@@ -145,6 +163,59 @@ export default function Home() {
     setCredentials(initialCredentials);
     setUseCustomCredentials(false);
     setRememberCredentials(false);
+    setThreadsConnection({ kind: "idle", message: "" });
+  }
+
+  async function connectThreads(): Promise<void> {
+    const accessToken = credentials.threadsAccessToken.trim();
+    if (!accessToken) {
+      setThreadsConnection({
+        kind: "error",
+        message: "Informe o token do Threads para conectar.",
+      });
+      return;
+    }
+
+    setConnectingThreads(true);
+    setThreadsConnection({ kind: "idle", message: "" });
+
+    try {
+      const response = await fetch("/api/threads/connect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ accessToken }),
+      });
+
+      const raw = await response.text();
+      const data = raw
+        ? (JSON.parse(raw) as ThreadsConnectResponse)
+        : ({ ok: false, error: "Resposta vazia." } as ThreadsConnectResponse);
+
+      if (response.ok && data.ok && data.user) {
+        setCredentials((current) => ({
+          ...current,
+          threadsUserId: data.user?.id ?? current.threadsUserId,
+        }));
+        setThreadsConnection({
+          kind: "ok",
+          message: data.message ?? `Conectado como @${data.user.username}.`,
+        });
+      } else {
+        setThreadsConnection({
+          kind: "error",
+          message: data.error ?? "Nao foi possivel conectar no Threads.",
+        });
+      }
+    } catch {
+      setThreadsConnection({
+        kind: "error",
+        message: "Falha de rede ao validar token do Threads.",
+      });
+    } finally {
+      setConnectingThreads(false);
+    }
   }
 
   return (
@@ -265,7 +336,7 @@ export default function Home() {
                 </label>
 
                 <label htmlFor="threadsUserId">
-                  Threads User ID (opcional)
+                  Threads User ID (auto)
                   <input
                     id="threadsUserId"
                     type="text"
@@ -278,7 +349,8 @@ export default function Home() {
                 </label>
 
                 <p className="helper">
-                  Deixe o User ID vazio para publicar com o endpoint &quot;me&quot;.
+                  Clique em &quot;Conectar Threads&quot; para validar token e preencher
+                  automaticamente.
                 </p>
 
                 <label htmlFor="threadsAccessToken">
@@ -293,6 +365,31 @@ export default function Home() {
                     placeholder="EAAB..."
                   />
                 </label>
+
+                <div className="threads-connect-row">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={connectThreads}
+                    disabled={connectingThreads}
+                  >
+                    {connectingThreads
+                      ? "Conectando..."
+                      : "Conectar Threads"}
+                  </button>
+
+                  {threadsConnection.kind !== "idle" && (
+                    <p
+                      className={
+                        threadsConnection.kind === "ok"
+                          ? "helper success-helper"
+                          : "helper error-helper"
+                      }
+                    >
+                      {threadsConnection.message}
+                    </p>
+                  )}
+                </div>
               </div>
             )}
 

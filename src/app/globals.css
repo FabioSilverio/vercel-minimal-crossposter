@@ -176,6 +176,12 @@ input[type="checkbox"] {
   font-size: 0.78rem;
 }
 
+.threads-connect-row {
+  display: grid;
+  gap: 0.45rem;
+  align-items: start;
+}
+
 .primary-button,
 .secondary-button {
   margin-top: 0.6rem;
@@ -218,6 +224,19 @@ input[type="checkbox"] {
 .secondary-button:hover {
   border-color: #919191;
   color: #fff;
+}
+
+.secondary-button:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.success-helper {
+  color: #97e0a9;
+}
+
+.error-helper {
+  color: #ffbaba;
 }
 
 .result-panel h2 {
@@ -278,6 +297,10 @@ article p {
   }
 
   .helper {
+    grid-column: 1 / -1;
+  }
+
+  .threads-connect-row {
     grid-column: 1 / -1;
   }
 }

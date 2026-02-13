@@ -125,7 +125,7 @@ export async function POST(request: Request) {
 
         results.threads = {
           ok: true,
-          message: "Publicado no Threads.",
+          message: `Publicado no Threads (API ${output.apiVersion}).`,
           id: output.postId,
         };
       } catch (error) {

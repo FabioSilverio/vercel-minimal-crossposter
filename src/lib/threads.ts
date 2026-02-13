@@ -6,51 +6,193 @@ type ThreadsConfig = {
 type ThreadsResult = {
   creationId: string;
   postId: string;
+  apiVersion: string;
+};
+
+type ThreadsUser = {
+  id: string;
+  username: string;
+};
+
+type ThreadsApiError = {
+  message?: string;
+  error_user_msg?: string;
+  error_user_title?: string;
 };
 
 type ThreadsApiResponse = {
   id?: string;
+  error?: ThreadsApiError;
   error_description?: string;
-  error?: {
-    message?: string;
-    error_user_msg?: string;
-    error_user_title?: string;
-  };
+  username?: string;
 };
 
-const THREADS_API_BASE = "https://graph.threads.net/v1.0";
-const THREADS_TEXT_LIMIT = 500;
+type ParsedResponse = {
+  data: ThreadsApiResponse | null;
+  raw: string;
+};
 
-async function parseJsonSafe<T>(response: Response): Promise<T | null> {
+const THREADS_TEXT_LIMIT = 500;
+const THREADS_BASE = "https://graph.threads.net";
+const DEFAULT_THREADS_VERSIONS = ["", "v1.0"] as const;
+
+function normalizeVersion(version: string): string {
+  return version.trim().replace(/^\/+|\/+$/g, "");
+}
+
+function getVersionCandidates(): string[] {
+  const envVersion = normalizeVersion(process.env.THREADS_API_VERSION ?? "");
+  const versions = envVersion
+    ? [envVersion]
+    : DEFAULT_THREADS_VERSIONS.map((item) => normalizeVersion(item));
+  return Array.from(new Set(versions));
+}
+
+function buildPath(version: string, endpoint: string): string {
+  const normalizedEndpoint = endpoint.replace(/^\/+/, "");
+  return version ? `${THREADS_BASE}/${version}/${normalizedEndpoint}` : `${THREADS_BASE}/${normalizedEndpoint}`;
+}
+
+function buildUrl(
+  version: string,
+  endpoint: string,
+  params: Record<string, string>,
+  accessToken: string,
+): string {
+  const url = new URL(buildPath(version, endpoint));
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
+  url.searchParams.set("access_token", accessToken);
+  return url.toString();
+}
+
+async function parseJsonSafe(response: Response): Promise<ParsedResponse> {
   const raw = await response.text();
   if (!raw) {
-    return null;
+    return { data: null, raw: "" };
   }
 
   try {
-    return JSON.parse(raw) as T;
+    return {
+      data: JSON.parse(raw) as ThreadsApiResponse,
+      raw,
+    };
   } catch {
-    return null;
+    return { data: null, raw };
   }
-}
-
-function resolveTargetUser(userId?: string): string {
-  const normalized = (userId ?? "").trim();
-  return normalized || "me";
 }
 
 function buildThreadsError(
   context: string,
   response: Response,
-  data: ThreadsApiResponse | null,
+  parsed: ParsedResponse,
 ): Error {
+  const snippet = parsed.raw.trim().slice(0, 180);
   const reason =
-    data?.error?.error_user_msg ??
-    data?.error?.message ??
-    data?.error_description ??
+    parsed.data?.error?.error_user_msg ??
+    parsed.data?.error?.message ??
+    parsed.data?.error_description ??
+    snippet ??
     `HTTP ${response.status}`;
 
   return new Error(`${context}: ${reason}`);
+}
+
+async function postCreateContainer(
+  version: string,
+  accessToken: string,
+  text: string,
+  userId?: string,
+): Promise<{ creationId: string }> {
+  const actor = userId?.trim() || "me";
+  const url = buildUrl(
+    version,
+    `${actor}/threads`,
+    {
+      media_type: "TEXT",
+      text,
+    },
+    accessToken,
+  );
+
+  const response = await fetch(url, {
+    method: "POST",
+    cache: "no-store",
+  });
+  const parsed = await parseJsonSafe(response);
+
+  if (!response.ok || !parsed.data?.id) {
+    throw buildThreadsError("Falha ao criar postagem no Threads", response, parsed);
+  }
+
+  return {
+    creationId: parsed.data.id,
+  };
+}
+
+async function postPublishContainer(
+  version: string,
+  accessToken: string,
+  creationId: string,
+  userId?: string,
+): Promise<{ postId: string }> {
+  const actor = userId?.trim() || "me";
+  const url = buildUrl(
+    version,
+    `${actor}/threads_publish`,
+    {
+      creation_id: creationId,
+    },
+    accessToken,
+  );
+
+  const response = await fetch(url, {
+    method: "POST",
+    cache: "no-store",
+  });
+  const parsed = await parseJsonSafe(response);
+
+  if (!response.ok || !parsed.data?.id) {
+    throw buildThreadsError(
+      "Falha ao publicar postagem no Threads",
+      response,
+      parsed,
+    );
+  }
+
+  return {
+    postId: parsed.data.id,
+  };
+}
+
+export async function fetchThreadsUserByToken(accessToken: string): Promise<ThreadsUser> {
+  const versionCandidates = getVersionCandidates();
+  let lastError: Error | null = null;
+
+  for (const version of versionCandidates) {
+    const url = buildUrl(version, "me", { fields: "id,username" }, accessToken);
+
+    const response = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+    });
+    const parsed = await parseJsonSafe(response);
+
+    if (response.ok && parsed.data?.id && parsed.data?.username) {
+      return {
+        id: parsed.data.id,
+        username: parsed.data.username,
+      };
+    }
+
+    lastError = buildThreadsError("Nao foi possivel validar token do Threads", response, parsed);
+    if (response.status < 500) {
+      throw lastError;
+    }
+  }
+
+  throw lastError ?? new Error("Nao foi possivel validar token do Threads.");
 }
 
 export async function postToThreads(
@@ -61,59 +203,35 @@ export async function postToThreads(
     throw new Error(`Threads aceita no maximo ${THREADS_TEXT_LIMIT} caracteres.`);
   }
 
-  const targetUser = resolveTargetUser(config.userId);
+  const versionCandidates = getVersionCandidates();
+  let lastError: Error | null = null;
 
-  const createPayload = new URLSearchParams({
-    media_type: "TEXT",
-    text,
-  });
+  for (const version of versionCandidates) {
+    try {
+      const created = await postCreateContainer(
+        version,
+        config.accessToken,
+        text,
+        config.userId,
+      );
+      const published = await postPublishContainer(
+        version,
+        config.accessToken,
+        created.creationId,
+        config.userId,
+      );
 
-  const createResponse = await fetch(
-    `${THREADS_API_BASE}/${targetUser}/threads?access_token=${encodeURIComponent(config.accessToken)}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Bearer ${config.accessToken}`,
-      },
-      body: createPayload.toString(),
-      cache: "no-store",
-    },
-  );
-
-  const createData = await parseJsonSafe<ThreadsApiResponse>(createResponse);
-  if (!createResponse.ok || !createData?.id) {
-    throw buildThreadsError("Falha ao criar postagem no Threads", createResponse, createData);
+      return {
+        creationId: created.creationId,
+        postId: published.postId,
+        apiVersion: version || "app-default",
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        lastError = error;
+      }
+    }
   }
 
-  const publishPayload = new URLSearchParams({
-    creation_id: createData.id,
-  });
-
-  const publishResponse = await fetch(
-    `${THREADS_API_BASE}/${targetUser}/threads_publish?access_token=${encodeURIComponent(config.accessToken)}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Bearer ${config.accessToken}`,
-      },
-      body: publishPayload.toString(),
-      cache: "no-store",
-    },
-  );
-
-  const publishData = await parseJsonSafe<ThreadsApiResponse>(publishResponse);
-  if (!publishResponse.ok || !publishData?.id) {
-    throw buildThreadsError(
-      "Falha ao publicar postagem no Threads",
-      publishResponse,
-      publishData,
-    );
-  }
-
-  return {
-    creationId: createData.id,
-    postId: publishData.id,
-  };
+  throw lastError ?? new Error("Falha ao publicar postagem no Threads.");
 }

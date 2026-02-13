@@ -32,6 +32,9 @@ No formulario:
 - **Conectar com Threads OAuth**: faz login oficial, busca token e usuario automaticamente.
 - **Conectar Threads**: valida manualmente um token ja preenchido.
 - Configure no Meta App a mesma callback URI de `THREADS_REDIRECT_URI`.
+- Para salvar no painel da Meta, use tambem:
+  - Desinstalar URL: `https://vercel-minimal-crossposter.vercel.app/api/threads/oauth/deauthorize`
+  - Excluir URL: `https://vercel-minimal-crossposter.vercel.app/api/threads/oauth/data-deletion`
 
 ## Rodando localmente
 

@@ -34,7 +34,7 @@ type ParsedResponse = {
 
 const THREADS_TEXT_LIMIT = 500;
 const THREADS_BASE = "https://graph.threads.net";
-const DEFAULT_THREADS_VERSIONS = ["", "v1.0"] as const;
+const DEFAULT_THREADS_VERSIONS = ["v1.0", ""] as const;
 
 function normalizeVersion(version: string): string {
   return version.trim().replace(/^\/+|\/+$/g, "");
@@ -168,31 +168,45 @@ async function postPublishContainer(
 
 export async function fetchThreadsUserByToken(accessToken: string): Promise<ThreadsUser> {
   const versionCandidates = getVersionCandidates();
-  let lastError: Error | null = null;
+  const errors: string[] = [];
 
   for (const version of versionCandidates) {
-    const url = buildUrl(version, "me", { fields: "id,username" }, accessToken);
+    try {
+      const url = buildUrl(version, "me", { fields: "id,username" }, accessToken);
 
-    const response = await fetch(url, {
-      method: "GET",
-      cache: "no-store",
-    });
-    const parsed = await parseJsonSafe(response);
+      const response = await fetch(url, {
+        method: "GET",
+        cache: "no-store",
+      });
+      const parsed = await parseJsonSafe(response);
 
-    if (response.ok && parsed.data?.id && parsed.data?.username) {
-      return {
-        id: parsed.data.id,
-        username: parsed.data.username,
-      };
-    }
+      if (response.ok && parsed.data?.id && parsed.data?.username) {
+        return {
+          id: parsed.data.id,
+          username: parsed.data.username,
+        };
+      }
 
-    lastError = buildThreadsError("Nao foi possivel validar token do Threads", response, parsed);
-    if (response.status < 500) {
-      throw lastError;
+      const error = buildThreadsError(
+        "Nao foi possivel validar token do Threads",
+        response,
+        parsed,
+      );
+      const tag = version || "app-default";
+      errors.push(`[${tag}] ${error.message}`);
+    } catch (error) {
+      const tag = version || "app-default";
+      const message =
+        error instanceof Error ? error.message : "erro de rede ao validar token";
+      errors.push(`[${tag}] ${message}`);
     }
   }
 
-  throw lastError ?? new Error("Nao foi possivel validar token do Threads.");
+  throw new Error(
+    errors.length
+      ? `Nao foi possivel validar token do Threads. Detalhes: ${errors.join(" | ")}`
+      : "Nao foi possivel validar token do Threads.",
+  );
 }
 
 export async function postToThreads(
@@ -204,7 +218,7 @@ export async function postToThreads(
   }
 
   const versionCandidates = getVersionCandidates();
-  let lastError: Error | null = null;
+  const errors: string[] = [];
 
   for (const version of versionCandidates) {
     try {
@@ -227,11 +241,18 @@ export async function postToThreads(
         apiVersion: version || "app-default",
       };
     } catch (error) {
-      if (error instanceof Error) {
-        lastError = error;
-      }
+      const tag = version || "app-default";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "erro ao publicar no Threads";
+      errors.push(`[${tag}] ${message}`);
     }
   }
 
-  throw lastError ?? new Error("Falha ao publicar postagem no Threads.");
+  throw new Error(
+    errors.length
+      ? `Falha ao publicar postagem no Threads. Detalhes: ${errors.join(" | ")}`
+      : "Falha ao publicar postagem no Threads.",
+  );
 }

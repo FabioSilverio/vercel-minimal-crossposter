@@ -110,16 +110,16 @@ export async function POST(request: Request) {
       process.env.THREADS_ACCESS_TOKEN,
     );
 
-    if (!userId || !accessToken) {
+    if (!accessToken) {
       results.threads = {
         ok: false,
         message:
-          "Credenciais do Threads ausentes. Configure .env.local ou envie pelo formulario.",
+          "Token do Threads ausente. Configure .env.local ou envie pelo formulario.",
       };
     } else {
       try {
         const output = await postToThreads(text, {
-          userId,
+          userId: userId || undefined,
           accessToken,
         });
 

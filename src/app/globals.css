@@ -130,7 +130,8 @@ input:focus {
 }
 
 .choices label,
-.credentials-header label {
+.credentials-header label,
+.credentials-actions label {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
@@ -154,34 +155,69 @@ input[type="checkbox"] {
   flex-wrap: wrap;
 }
 
+.credentials-actions {
+  margin-top: -0.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem 1rem;
+  flex-wrap: wrap;
+}
+
 .credentials-grid {
   display: grid;
   gap: 0.8rem;
   grid-template-columns: 1fr;
 }
 
-button {
-  margin-top: 0.6rem;
-  border: 1px solid var(--foreground);
-  color: #050505;
-  background: var(--foreground);
-  font-family: var(--font-geist-mono), monospace;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
+.helper {
+  margin: -0.2rem 0 0;
+  color: #9c9c9c;
   font-size: 0.78rem;
-  padding: 0.85rem 1rem;
+}
+
+.primary-button,
+.secondary-button {
+  margin-top: 0.6rem;
+  font-family: var(--font-geist-mono), monospace;
   cursor: pointer;
   transition: 180ms ease-in-out;
 }
 
-button:hover:not(:disabled) {
+.primary-button {
+  border: 1px solid var(--foreground);
+  color: #050505;
+  background: var(--foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-size: 0.78rem;
+  padding: 0.85rem 1rem;
+}
+
+.primary-button:hover:not(:disabled) {
   background: transparent;
   color: var(--foreground);
 }
 
-button:disabled {
+.primary-button:disabled {
   opacity: 0.6;
   cursor: progress;
+}
+
+.secondary-button {
+  margin-top: 0;
+  border: 1px solid #555;
+  background: transparent;
+  color: #cfcfcf;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.45rem 0.7rem;
+}
+
+.secondary-button:hover {
+  border-color: #919191;
+  color: #fff;
 }
 
 .result-panel h2 {
@@ -239,5 +275,9 @@ article p {
 
   .credentials-grid {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .helper {
+    grid-column: 1 / -1;
   }
 }

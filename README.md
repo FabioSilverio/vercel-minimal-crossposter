@@ -21,6 +21,8 @@ THREADS_ACCESS_TOKEN=EAAB...
 ```
 
 Tambem e possivel informar credenciais direto no formulario da interface.
+O `THREADS_USER_ID` e opcional: se vazio, o app usa o endpoint `me`.
+As credenciais digitadas no formulario podem ser salvas localmente no navegador.
 
 ## Rodando localmente
 
@@ -36,6 +38,7 @@ Acesse `http://localhost:3000`.
 - `POST /api/post` recebe texto + canais selecionados.
 - Bluesky: login via `@atproto/api` e publicacao de texto.
 - Threads: cria container de texto e publica via `threads_publish`.
+- O parser de resposta do Threads e tolerante a respostas vazias/invalidas para evitar erro de JSON.
 
 ## Observacoes
 

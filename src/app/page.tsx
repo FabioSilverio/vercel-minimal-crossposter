@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Channel = "bluesky" | "threads";
 
@@ -23,16 +23,22 @@ const initialChannels: ChannelsState = {
   threads: true,
 };
 
+const STORAGE_KEY = "crosspost.credentials.v1";
+
+const initialCredentials = {
+  blueskyIdentifier: "",
+  blueskyAppPassword: "",
+  threadsUserId: "",
+  threadsAccessToken: "",
+};
+
 export default function Home() {
   const [text, setText] = useState("");
   const [channels, setChannels] = useState<ChannelsState>(initialChannels);
   const [useCustomCredentials, setUseCustomCredentials] = useState(false);
-  const [credentials, setCredentials] = useState({
-    blueskyIdentifier: "",
-    blueskyAppPassword: "",
-    threadsUserId: "",
-    threadsAccessToken: "",
-  });
+  const [credentials, setCredentials] = useState(initialCredentials);
+  const [rememberCredentials, setRememberCredentials] = useState(true);
+  const [storageReady, setStorageReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<PostResponse | null>(null);
 
@@ -40,6 +46,50 @@ export default function Home() {
     () => Object.values(channels).filter(Boolean).length,
     [channels],
   );
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as {
+          useCustomCredentials?: boolean;
+          rememberCredentials?: boolean;
+          credentials?: Partial<typeof initialCredentials>;
+        };
+
+        setUseCustomCredentials(Boolean(parsed.useCustomCredentials));
+        setRememberCredentials(parsed.rememberCredentials ?? true);
+        setCredentials((current) => ({
+          ...current,
+          ...parsed.credentials,
+        }));
+      }
+    } catch {
+      localStorage.removeItem(STORAGE_KEY);
+    } finally {
+      setStorageReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) {
+      return;
+    }
+
+    if (!rememberCredentials) {
+      localStorage.removeItem(STORAGE_KEY);
+      return;
+    }
+
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        useCustomCredentials,
+        rememberCredentials,
+        credentials,
+      }),
+    );
+  }, [credentials, rememberCredentials, storageReady, useCustomCredentials]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -70,11 +120,12 @@ export default function Home() {
         }),
       });
 
-      const data = (await response.json()) as PostResponse;
+      const raw = await response.text();
+      const data = raw ? (JSON.parse(raw) as PostResponse) : { results: {} };
       setResult(data);
     } catch {
       setResult({
-        error: "Falha de rede ao tentar publicar. Tente novamente.",
+        error: "Falha de rede ou resposta invalida ao tentar publicar.",
         results: {},
       });
     } finally {
@@ -87,6 +138,13 @@ export default function Home() {
     value: string,
   ): void {
     setCredentials((current) => ({ ...current, [field]: value }));
+  }
+
+  function clearSavedCredentials(): void {
+    localStorage.removeItem(STORAGE_KEY);
+    setCredentials(initialCredentials);
+    setUseCustomCredentials(false);
+    setRememberCredentials(false);
   }
 
   return (
@@ -158,6 +216,26 @@ export default function Home() {
               </label>
             </div>
 
+            <div className="credentials-actions">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={rememberCredentials}
+                  onChange={(event) =>
+                    setRememberCredentials(event.target.checked)
+                  }
+                />
+                Salvar credenciais neste navegador
+              </label>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={clearSavedCredentials}
+              >
+                Limpar salvas
+              </button>
+            </div>
+
             {useCustomCredentials && (
               <div className="credentials-grid">
                 <label htmlFor="blueskyIdentifier">
@@ -187,7 +265,7 @@ export default function Home() {
                 </label>
 
                 <label htmlFor="threadsUserId">
-                  Threads User ID
+                  Threads User ID (opcional)
                   <input
                     id="threadsUserId"
                     type="text"
@@ -198,6 +276,10 @@ export default function Home() {
                     placeholder="1234567890"
                   />
                 </label>
+
+                <p className="helper">
+                  Deixe o User ID vazio para publicar com o endpoint &quot;me&quot;.
+                </p>
 
                 <label htmlFor="threadsAccessToken">
                   Threads Access Token
@@ -214,7 +296,7 @@ export default function Home() {
               </div>
             )}
 
-            <button type="submit" disabled={loading}>
+            <button type="submit" className="primary-button" disabled={loading}>
               {loading ? "Publicando..." : "Publicar agora"}
             </button>
           </form>

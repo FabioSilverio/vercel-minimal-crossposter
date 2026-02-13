@@ -36,13 +36,18 @@ export async function POST(request: Request) {
       { status: 200 },
     );
   } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Falha ao validar token do Threads.";
+    const actionableMessage = message.includes("Token invalido")
+      ? `${message} Gere um novo token de usuario no produto Threads API e confirme as permissoes threads_basic e threads_content_publish.`
+      : message;
+
     return NextResponse.json(
       {
         ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Falha ao validar token do Threads.",
+        error: actionableMessage,
       },
       { status: 400 },
     );

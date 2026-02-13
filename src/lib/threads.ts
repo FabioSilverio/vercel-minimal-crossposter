@@ -88,13 +88,20 @@ function buildThreadsError(
   response: Response,
   parsed: ParsedResponse,
 ): Error {
+  const wwwAuthenticate = response.headers.get("www-authenticate") ?? "";
+  const authReason = wwwAuthenticate.includes("Cannot parse access token")
+    ? "Token invalido: Threads nao conseguiu interpretar o access token."
+    : wwwAuthenticate.includes("invalid_token")
+      ? "Token invalido para Threads API."
+      : "";
   const snippet = parsed.raw.trim().slice(0, 180);
   const reason =
-    parsed.data?.error?.error_user_msg ??
-    parsed.data?.error?.message ??
-    parsed.data?.error_description ??
-    snippet ??
-    `HTTP ${response.status}`;
+    authReason ||
+    (parsed.data?.error?.error_user_msg ??
+      parsed.data?.error?.message ??
+      parsed.data?.error_description ??
+      snippet ??
+      `HTTP ${response.status}`);
 
   return new Error(`${context}: ${reason}`);
 }

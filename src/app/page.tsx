@@ -26,6 +26,23 @@ type ThreadsConnectResponse = {
   };
 };
 
+type ThreadsOAuthSessionResponse = {
+  ok: boolean;
+  empty?: boolean;
+  message?: string;
+  error?: string;
+  accessToken?: string;
+  user?: {
+    id: string;
+    username: string;
+  };
+  tokenMeta?: {
+    apiVersion: string;
+    isLongLived: boolean;
+    expiresIn: number | null;
+  };
+};
+
 type ChannelsState = Record<Channel, boolean>;
 
 const initialChannels: ChannelsState = {
@@ -51,6 +68,7 @@ export default function Home() {
   const [storageReady, setStorageReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [connectingThreads, setConnectingThreads] = useState(false);
+  const [connectingThreadsOAuth, setConnectingThreadsOAuth] = useState(false);
   const [threadsConnection, setThreadsConnection] = useState<{
     kind: "idle" | "ok" | "error";
     message: string;
@@ -108,6 +126,58 @@ export default function Home() {
       }),
     );
   }, [credentials, rememberCredentials, storageReady, useCustomCredentials]);
+
+  useEffect(() => {
+    async function pullOAuthSession(): Promise<void> {
+      try {
+        const response = await fetch("/api/threads/oauth/session", {
+          method: "GET",
+          cache: "no-store",
+        });
+        const raw = await response.text();
+        if (!raw) {
+          return;
+        }
+
+        const data = JSON.parse(raw) as ThreadsOAuthSessionResponse;
+        if (data.empty) {
+          return;
+        }
+
+        if (response.ok && data.ok && data.accessToken && data.user) {
+          setUseCustomCredentials(true);
+          setRememberCredentials(true);
+          setCredentials((current) => ({
+            ...current,
+            threadsAccessToken: data.accessToken ?? current.threadsAccessToken,
+            threadsUserId: data.user?.id ?? current.threadsUserId,
+          }));
+
+          const tokenLabel = data.tokenMeta?.isLongLived
+            ? "long-lived"
+            : "short-lived";
+          setThreadsConnection({
+            kind: "ok",
+            message:
+              data.message ??
+              `Threads OAuth conectado (${tokenLabel}) como @${data.user.username}.`,
+          });
+        } else if (data.error) {
+          setThreadsConnection({
+            kind: "error",
+            message: data.error,
+          });
+        }
+      } catch {
+        setThreadsConnection({
+          kind: "error",
+          message: "Falha ao recuperar sessao OAuth do Threads.",
+        });
+      }
+    }
+
+    void pullOAuthSession();
+  }, []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -216,6 +286,11 @@ export default function Home() {
     } finally {
       setConnectingThreads(false);
     }
+  }
+
+  function startThreadsOAuth(): void {
+    setConnectingThreadsOAuth(true);
+    window.location.assign("/api/threads/oauth/start");
   }
 
   return (
@@ -349,8 +424,7 @@ export default function Home() {
                 </label>
 
                 <p className="helper">
-                  Clique em &quot;Conectar Threads&quot; para validar token e preencher
-                  automaticamente.
+                  Clique em &quot;Conectar com Threads OAuth&quot; para login automatico.
                 </p>
 
                 <label htmlFor="threadsAccessToken">
@@ -367,6 +441,17 @@ export default function Home() {
                 </label>
 
                 <div className="threads-connect-row">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={startThreadsOAuth}
+                    disabled={connectingThreadsOAuth}
+                  >
+                    {connectingThreadsOAuth
+                      ? "Redirecionando..."
+                      : "Conectar com Threads OAuth"}
+                  </button>
+
                   <button
                     type="button"
                     className="secondary-button"

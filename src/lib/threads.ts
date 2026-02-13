@@ -3,6 +3,21 @@ type ThreadsConfig = {
   accessToken: string;
 };
 
+type ThreadsAuthorizeConfig = {
+  clientId: string;
+  redirectUri: string;
+  state: string;
+  scopes?: string[];
+};
+
+type ThreadsOAuthToken = {
+  accessToken: string;
+  tokenType: string;
+  expiresIn: number | null;
+  apiVersion: string;
+  isLongLived: boolean;
+};
+
 type ThreadsResult = {
   creationId: string;
   postId: string;
@@ -22,6 +37,9 @@ type ThreadsApiError = {
 
 type ThreadsApiResponse = {
   id?: string;
+  access_token?: string;
+  token_type?: string;
+  expires_in?: number;
   error?: ThreadsApiError;
   error_description?: string;
   username?: string;
@@ -34,7 +52,9 @@ type ParsedResponse = {
 
 const THREADS_TEXT_LIMIT = 500;
 const THREADS_BASE = "https://graph.threads.net";
+const THREADS_AUTH_BASE = "https://www.threads.net";
 const DEFAULT_THREADS_VERSIONS = ["v1.0", ""] as const;
+const DEFAULT_THREADS_SCOPES = ["threads_basic", "threads_content_publish"];
 
 function normalizeVersion(version: string): string {
   return version.trim().replace(/^\/+|\/+$/g, "");
@@ -64,6 +84,18 @@ function buildUrl(
     url.searchParams.set(key, value);
   }
   url.searchParams.set("access_token", accessToken);
+  return url.toString();
+}
+
+function buildUrlWithoutToken(
+  version: string,
+  endpoint: string,
+  params: Record<string, string>,
+): string {
+  const url = new URL(buildPath(version, endpoint));
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
   return url.toString();
 }
 
@@ -104,6 +136,137 @@ function buildThreadsError(
       `HTTP ${response.status}`);
 
   return new Error(`${context}: ${reason}`);
+}
+
+export function buildThreadsAuthorizeUrl(config: ThreadsAuthorizeConfig): string {
+  const url = new URL("/oauth/authorize", THREADS_AUTH_BASE);
+  url.searchParams.set("client_id", config.clientId);
+  url.searchParams.set("redirect_uri", config.redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", (config.scopes ?? DEFAULT_THREADS_SCOPES).join(","));
+  url.searchParams.set("state", config.state);
+  return url.toString();
+}
+
+function buildOAuthError(context: string, response: Response, parsed: ParsedResponse): Error {
+  const snippet = parsed.raw.trim().slice(0, 180);
+  const reason =
+    parsed.data?.error?.error_user_msg ??
+    parsed.data?.error?.message ??
+    parsed.data?.error_description ??
+    snippet ??
+    `HTTP ${response.status}`;
+
+  return new Error(`${context}: ${reason}`);
+}
+
+async function exchangeCodeForShortToken(
+  version: string,
+  code: string,
+  redirectUri: string,
+  appId: string,
+  appSecret: string,
+): Promise<ThreadsOAuthToken> {
+  const url = buildUrlWithoutToken(version, "oauth/access_token", {});
+  const body = new URLSearchParams({
+    client_id: appId,
+    client_secret: appSecret,
+    grant_type: "authorization_code",
+    redirect_uri: redirectUri,
+    code,
+  });
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body.toString(),
+    cache: "no-store",
+  });
+  const parsed = await parseJsonSafe(response);
+
+  if (!response.ok || !parsed.data?.access_token) {
+    throw buildOAuthError("Falha no OAuth do Threads", response, parsed);
+  }
+
+  return {
+    accessToken: parsed.data.access_token,
+    tokenType: parsed.data.token_type ?? "bearer",
+    expiresIn: parsed.data.expires_in ?? null,
+    apiVersion: version || "app-default",
+    isLongLived: false,
+  };
+}
+
+async function exchangeTokenForLongLived(
+  version: string,
+  shortToken: string,
+  appSecret: string,
+): Promise<ThreadsOAuthToken | null> {
+  const url = buildUrl(version, "access_token", {
+    grant_type: "th_exchange_token",
+    client_secret: appSecret,
+  }, shortToken);
+
+  const response = await fetch(url, {
+    method: "GET",
+    cache: "no-store",
+  });
+  const parsed = await parseJsonSafe(response);
+
+  if (!response.ok || !parsed.data?.access_token) {
+    return null;
+  }
+
+  return {
+    accessToken: parsed.data.access_token,
+    tokenType: parsed.data.token_type ?? "bearer",
+    expiresIn: parsed.data.expires_in ?? null,
+    apiVersion: version || "app-default",
+    isLongLived: true,
+  };
+}
+
+export async function exchangeThreadsCodeForToken(
+  code: string,
+  redirectUri: string,
+  appId: string,
+  appSecret: string,
+): Promise<ThreadsOAuthToken> {
+  const versionCandidates = getVersionCandidates();
+  const errors: string[] = [];
+
+  for (const version of versionCandidates) {
+    try {
+      const shortToken = await exchangeCodeForShortToken(
+        version,
+        code,
+        redirectUri,
+        appId,
+        appSecret,
+      );
+
+      const longToken = await exchangeTokenForLongLived(
+        version,
+        shortToken.accessToken,
+        appSecret,
+      );
+
+      return longToken ?? shortToken;
+    } catch (error) {
+      const tag = version || "app-default";
+      const message =
+        error instanceof Error ? error.message : "erro ao trocar code por token";
+      errors.push(`[${tag}] ${message}`);
+    }
+  }
+
+  throw new Error(
+    errors.length
+      ? `Nao foi possivel concluir OAuth do Threads. Detalhes: ${errors.join(" | ")}`
+      : "Nao foi possivel concluir OAuth do Threads.",
+  );
 }
 
 async function postCreateContainer(
